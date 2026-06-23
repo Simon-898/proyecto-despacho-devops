@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-despacho
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: despacho
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./back-Despachos_SpringBoot/Springboot-API-REST-DESPACHO
+    container_name: despacho-backend-container
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_ENDPOINT: mysql
+      DB_PORT: 3306
+      DB_NAME: despacho
+      DB_USERNAME: root
+      DB_PASSWORD: root
+    ports:
+      - "8081:8081"
+    restart: always
+
+  frontend:
+    build:
+      context: ./front_despacho
+    container_name: despacho-frontend-container
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    restart: always
+
+volumes:
+  mysql_data:

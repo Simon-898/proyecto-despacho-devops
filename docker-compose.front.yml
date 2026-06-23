@@ -1,0 +1,8 @@
+services:
+  frontend:
+    build:
+      context: ./front_despacho
+    container_name: despacho-frontend-container
+    ports:
+      - "5173:80"
+    restart: always
