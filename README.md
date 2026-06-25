@@ -2,7 +2,7 @@
 
 ## Descripción General
 
-**Proyecto Despacho** es una aplicación web moderna de gestión que implementa una arquitectura de microservicios completa. El proyecto demuestra prácticas avanzadas de DevOps mediante la contenedorización de todos sus componentes (Frontend, Backend y Base de Datos) utilizando Docker y Docker Compose para orquestación.
+**Proyecto Despacho** es una aplicación web moderna de gestión que implementa una arquitectura de microservicios completa. El proyecto demuestra prácticas avanzadas de DevOps mediante la contenedorización, orquestación y automatización de despliegues en infraestructura cloud.
 
 La solución permite desplegar y gestionar de forma eficiente un sistema integrado de tres capas, asegurando portabilidad, reproducibilidad y escalabilidad en diferentes entornos.
 
@@ -42,6 +42,11 @@ proyecto-despacho-devops/
 │       ├── pom.xml
 │       ├── src/
 │       └── target/
+│
+├── .github/
+│   └── workflows/                           # Workflows de GitHub Actions
+│       ├── build-and-push-backend.yml       # CI/CD Backend ECS/ECR
+│       └── build-and-push-frontend.yml      # CI/CD Frontend ECS/ECR
 │
 ├── docker-compose.yml                       # Orquestación de servicios
 ├── .gitignore
@@ -197,6 +202,359 @@ networks:
 **Red `despacho-network`**: Bridge network que permite comunicación segura y aislada entre contenedores usando DNS interno (ej: `mysql-despacho` desde el backend).
 
 **Healthcheck**: Verifica que MySQL esté listo antes de iniciar el backend, asegurando dependencias correctas.
+
+---
+
+## CI/CD con GitHub Actions - ECS y ECR
+
+### Descripción General
+
+El proyecto implementa una **tubería de integración continua y despliegue continuo (CI/CD)** mediante **GitHub Actions** que automatiza:
+
+1. **Build de imágenes Docker** del Frontend y Backend
+2. **Push a Amazon ECR** (Elastic Container Registry)
+3. **Despliegue automático en ECS** (Elastic Container Service) en AWS
+
+### Arquitectura CI/CD
+
+```
+Push a rama (main/develop)
+    ↓
+GitHub Actions se dispara
+    ↓
+Build imagen Docker
+    ↓
+Push a Amazon ECR
+    ↓
+Actualizar servicio en ECS
+    ↓
+Despliegue automático
+```
+
+---
+
+### Workflow - Backend (ECS/ECR)
+
+**Ubicación**: `.github/workflows/build-and-push-backend.yml`
+
+Este workflow automatiza el despliegue del Backend en AWS ECS:
+
+```yaml
+name: Build and Push Backend to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'back-Despachos_SpringBoot/**'
+      - '.github/workflows/build-and-push-backend.yml'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v3
+
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build imagen Docker del Backend
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: despacho-backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            -f back-Despachos_SpringBoot/Springboot-API-REST-DESPACHO/Dockerfile \
+            back-Despachos_SpringBoot/Springboot-API-REST-DESPACHO/
+
+      - name: Push imagen a Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: despacho-backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Actualizar servicio ECS
+        env:
+          ECS_CLUSTER: despacho-cluster
+          ECS_SERVICE: despacho-backend-service
+          ECS_TASK_DEFINITION: despacho-backend-task
+          AWS_REGION: us-east-1
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment \
+            --region $AWS_REGION
+```
+
+**Características principales**:
+- **Trigger**: Se dispara automáticamente en push a `main` o `develop` cuando hay cambios en el directorio del Backend
+- **Build**: Construye imagen Docker usando el Dockerfile del Backend
+- **Push**: Envía imagen a Amazon ECR con tags `latest` y `${{ github.sha }}`
+- **Despliegue**: Actualiza automáticamente el servicio ECS para usar la nueva imagen
+
+---
+
+### Workflow - Frontend (ECS/ECR)
+
+**Ubicación**: `.github/workflows/build-and-push-frontend.yml`
+
+Este workflow automatiza el despliegue del Frontend en AWS ECS:
+
+```yaml
+name: Build and Push Frontend to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'front_despacho/**'
+      - '.github/workflows/build-and-push-frontend.yml'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v3
+
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build imagen Docker del Frontend
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: despacho-frontend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            -f front_despacho/Dockerfile \
+            front_despacho/
+
+      - name: Push imagen a Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: despacho-frontend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Actualizar servicio ECS
+        env:
+          ECS_CLUSTER: despacho-cluster
+          ECS_SERVICE: despacho-frontend-service
+          ECS_TASK_DEFINITION: despacho-frontend-task
+          AWS_REGION: us-east-1
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment \
+            --region $AWS_REGION
+```
+
+**Características principales**:
+- **Trigger**: Se dispara automáticamente en push a `main` o `develop` cuando hay cambios en el directorio del Frontend
+- **Build**: Construye imagen Docker usando el Dockerfile del Frontend (multi-stage con Nginx)
+- **Push**: Envía imagen a Amazon ECR con tags `latest` y `${{ github.sha }}`
+- **Despliegue**: Actualiza automáticamente el servicio ECS para usar la nueva imagen
+
+---
+
+### Configuración de Secretos en GitHub
+
+Para que los workflows funcionen correctamente, debes configurar los siguientes secretos en GitHub:
+
+**Ubicación**: Settings → Secrets and variables → Actions → New repository secret
+
+| Secreto | Descripción | Ejemplo |
+|---------|-------------|---------|
+| `AWS_ACCESS_KEY_ID` | ID de clave de acceso AWS | `AKIAIOSFODNN7EXAMPLE` |
+| `AWS_SECRET_ACCESS_KEY` | Clave de acceso secreta AWS | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+
+**Pasos para configurar**:
+
+1. Ve a tu repositorio en GitHub
+2. Haz clic en **Settings**
+3. Selecciona **Secrets and variables** → **Actions**
+4. Haz clic en **New repository secret**
+5. Agrega cada secreto con su valor correspondiente
+
+---
+
+### Requisitos Previos en AWS
+
+Antes de ejecutar los workflows, debes tener configurado en AWS:
+
+#### 1. **Amazon ECR - Repositorios**
+
+Crea dos repositorios en ECR:
+
+```bash
+aws ecr create-repository --repository-name despacho-backend --region us-east-1
+aws ecr create-repository --repository-name despacho-frontend --region us-east-1
+```
+
+#### 2. **Amazon ECS - Cluster**
+
+Crea un cluster ECS:
+
+```bash
+aws ecs create-cluster --cluster-name despacho-cluster --region us-east-1
+```
+
+#### 3. **ECS Task Definition - Backend**
+
+```json
+{
+  "family": "despacho-backend-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "despacho-backend",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/despacho-backend:latest",
+      "portMappings": [
+        {
+          "containerPort": 8081,
+          "hostPort": 8081,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "DB_ENDPOINT",
+          "value": "mysql-despacho"
+        },
+        {
+          "name": "DB_PORT",
+          "value": "3306"
+        },
+        {
+          "name": "DB_NAME",
+          "value": "despacho_db"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### 4. **ECS Task Definition - Frontend**
+
+```json
+{
+  "family": "despacho-frontend-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "despacho-frontend",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/despacho-frontend:latest",
+      "portMappings": [
+        {
+          "containerPort": 5173,
+          "hostPort": 5173,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "VITE_API_URL",
+          "value": "http://despacho-backend:8081"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### 5. **ECS Service - Backend**
+
+```bash
+aws ecs create-service \
+  --cluster despacho-cluster \
+  --service-name despacho-backend-service \
+  --task-definition despacho-backend-task \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxxxxxxx],securityGroups=[sg-xxxxxxxxx],assignPublicIp=ENABLED}" \
+  --region us-east-1
+```
+
+#### 6. **ECS Service - Frontend**
+
+```bash
+aws ecs create-service \
+  --cluster despacho-cluster \
+  --service-name despacho-frontend-service \
+  --task-definition despacho-frontend-task \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxxxxxxx],securityGroups=[sg-xxxxxxxxx],assignPublicIp=ENABLED}" \
+  --region us-east-1
+```
+
+---
+
+### Flujo de Despliegue Automatizado
+
+1. **Desarrollador hace push** a rama `main` o `develop`
+2. **GitHub Actions dispara** el workflow correspondiente
+3. **Workflow ejecuta**:
+   - Checkout del código
+   - Autenticación en AWS ECR
+   - Build de la imagen Docker
+   - Push a ECR con tags `latest` y SHA del commit
+4. **ECS actualiza automáticamente** el servicio con la nueva imagen
+5. **Despliegue en vivo** en segundos/minutos
+
+---
+
+### Monitoreo de Workflows
+
+Puedes ver el estado de los workflows en:
+
+**GitHub**: Actions → Selecciona el workflow → Ver detalles de la ejecución
+
+**Indicadores de estado**:
+- 🟢 **Verde**: Workflow completado exitosamente
+- 🟡 **Amarillo**: Workflow en ejecución
+- 🔴 **Rojo**: Workflow falló
 
 ---
 
@@ -386,6 +744,12 @@ Este proyecto implementa principios clave de DevOps:
 - Redes aisladas limitan exposición
 - Multigrana build minimiza superficie de ataque
 
+### 8. **Integración Continua y Despliegue Continuo (CI/CD)**
+- Workflows automáticos en GitHub Actions para despliegues
+- Build y push automático de imágenes a ECR
+- Despliegue sin intervención manual en ECS
+- Garantiza consistencia y rapidez en los despliegues a producción
+
 ---
 
 ## Comandos Útiles
@@ -466,6 +830,28 @@ docker network ls
 docker network inspect despacho-network
 ```
 
+### Comandos AWS CLI para CI/CD
+
+```bash
+# Ver repositorios ECR
+aws ecr describe-repositories --region us-east-1
+
+# Ver imágenes en repositorio ECR
+aws ecr describe-images --repository-name despacho-backend --region us-east-1
+
+# Ver servicios ECS
+aws ecs list-services --cluster despacho-cluster --region us-east-1
+
+# Ver tareas en ejecución
+aws ecs list-tasks --cluster despacho-cluster --region us-east-1
+
+# Describir servicio ECS
+aws ecs describe-services --cluster despacho-cluster --services despacho-backend-service --region us-east-1
+
+# Ver logs de despliegue ECS
+aws ecs describe-tasks --cluster despacho-cluster --tasks <TASK_ARN> --region us-east-1
+```
+
 ---
 
 ## Conclusión Técnica
@@ -480,11 +866,13 @@ El **Proyecto Despacho** demuestra una implementación profesional de DevOps med
 - ✅ **Multi-stage builds** para imágenes optimizadas
 - ✅ **Seguridad mejorada** con usuarios no-root
 - ✅ **Health checks** para confiabilidad
+- ✅ **Automatización CI/CD** con GitHub Actions, ECR y ECS
+- ✅ **Despliegues sin intervención manual** en infraestructura cloud
 
 Esta configuración es **production-ready** y escala fácilmente a orquestadores como Kubernetes, manteniendo los mismos conceptos y archivos (con mínimas adaptaciones).
 
 ---
 
-**Última actualización**: Mayo 2026  
-**Versión**: 1.0  
+**Última actualización**: Junio 2026  
+**Versión**: 2.0  
 **Mantenedor**: Equipo DevOps Proyecto Despacho
