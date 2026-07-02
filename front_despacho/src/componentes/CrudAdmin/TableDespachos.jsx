@@ -41,7 +41,7 @@ export const TableDespachos = () => {
               <thead>
                 <tr className="py-10">
                   <th className="pr-10">prueba pipeline....</th>
-                  <th className="pr-10">Orden de compra</th>
+                  <th className="pr-10">prueba pipeline 2</th>
                   <th className="pr-10">Dirección de entrega</th>
                   <th className="pr-10">Fecha despacho</th>
                   <th className="pr-10">Patente Camión</th>
